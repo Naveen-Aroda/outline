@@ -77,6 +77,11 @@ def trace_bitmap_to_svg(png_path, output_svg_path):
     try:
         # Convert PNG to BMP for potrace
         image = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
+        
+        # For outline-only images, invert so outline becomes black on white background
+        if "outline_only" in png_path:
+            image = cv2.bitwise_not(image)
+        
         bmp_path = png_path.replace('.png', '.bmp')
         cv2.imwrite(bmp_path, image)
         
@@ -119,20 +124,34 @@ def process_svg_file(svg_path, output_dir="output"):
     os.makedirs(output_dir, exist_ok=True)
     base_name = Path(svg_path).stem
     
+    # Save outline only as PNG (white outline on black background for proper tracing)
+    outline_only_png = f"{output_dir}/{base_name}_outline_only.png"
+    cv2.imwrite(outline_only_png, outline)
+    
+    # Save original image only as PNG
+    original_only_png = f"{output_dir}/{base_name}_original_only.png"
+    cv2.imwrite(original_only_png, image)
+    
     # Overlay outline on original image (keep black outline)
     overlay_image = image.copy()
     cv2.drawContours(overlay_image, final_contours, -1, (0, 0, 0), 5)  # Black outline
     overlay_png_path = f"{output_dir}/{base_name}_overlay.png"
     cv2.imwrite(overlay_png_path, overlay_image)
     
-    # Trace overlay bitmap to vector SVG using potrace
+    # Trace all three versions to SVG
     traced_overlay_svg = f"{output_dir}/{base_name}_traced_overlay.svg"
+    traced_outline_svg = f"{output_dir}/{base_name}_traced_outline_only.svg"
+    traced_original_svg = f"{output_dir}/{base_name}_traced_original_only.svg"
     
-    print(f"Tracing overlay bitmap to SVG...")
+    print(f"Tracing bitmaps to SVG...")
     trace_bitmap_to_svg(overlay_png_path, traced_overlay_svg)
+    trace_bitmap_to_svg(outline_only_png, traced_outline_svg)
+    trace_bitmap_to_svg(original_only_png, traced_original_svg)
     
-    # Clean up temporary overlay PNG
+    # Clean up temporary PNGs
     os.unlink(overlay_png_path)
+    os.unlink(outline_only_png)
+    os.unlink(original_only_png)
     
     return outline, final_contours
 
@@ -145,9 +164,9 @@ def main():
     for svg_file in svg_files:
         try:
             outline, contours = process_svg_file(str(svg_file), output_folder)
-            print(f"✓ Processed {svg_file.name}")
+            print(f"[OK] Processed {svg_file.name}")
         except Exception as e:
-            print(f"✗ Error processing {svg_file.name}: {e}")
+            print(f"[ERROR] Error processing {svg_file.name}: {e}")
 
 if __name__ == "__main__":
     main()
