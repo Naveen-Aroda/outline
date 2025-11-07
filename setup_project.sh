@@ -32,11 +32,9 @@ echo "⚙️ Activating virtual environment..."
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
-# ---- Step 6: Install external tools ----
-echo "🖼️ Installing Inkscape and Potrace..."
-sudo apt install -y inkscape potrace
 
-# ---- Step 7: Install Python requirements ----
+
+# ---- Step 6: Install Python requirements ----
 if [ -f "requirements.txt" ]; then
     echo "📜 Installing Python requirements..."
     python -m pip install --upgrade pip
@@ -45,7 +43,7 @@ else
     echo "⚠️  No requirements.txt found — skipping Python deps."
 fi
 
-# ---- Step 8: Confirm success ----
+# ---- Step 7: Confirm success ----
 echo "✅ Setup complete!"
 echo
 echo "To activate your environment later, run:"
