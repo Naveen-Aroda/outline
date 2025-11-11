@@ -7,6 +7,33 @@ import xml.etree.ElementTree as ET
 import re
 import io
 import cairosvg
+from scour.scour import scourString, parse_args as scour_args
+
+
+def scour_svg(infilename, outfilename):
+    """Simplify SVG using scour to reduce file size and optimize paths"""
+    # Read the input file content as string
+    with open(infilename, 'r', encoding='utf-8') as f:
+        input_content = f.read()
+    
+    # Check if file is not empty
+    if not input_content or not input_content.strip():
+        print(f"Warning: SVG file {infilename} is empty, skipping scour optimization")
+        return
+    
+    try:
+        # Get default scour options
+        options = scour_args()
+        
+        # Process the SVG string
+        output_content = scourString(input_content, options)
+        
+        # Write the optimized content
+        with open(outfilename, 'w', encoding='utf-8') as f:
+            f.write(output_content)
+    except Exception as e:
+        print(f"Warning: Scour optimization failed for {infilename}: {e}")
+        print("Continuing with unoptimized SVG...")
 
 
 def rasterize_svg(svg_path, output_size=2048, padding=400):
@@ -287,9 +314,19 @@ def contours_to_svg_direct(contours, image_size, output_svg_path, epsilon_factor
         })
         svg_root.append(path_elem)
     
-    # Write SVG file
+    # Write SVG file with proper flushing
     tree = ET.ElementTree(svg_root)
-    tree.write(output_svg_path, encoding='utf-8', xml_declaration=True)
+    with open(output_svg_path, 'wb') as f:
+        tree.write(f, encoding='utf-8', xml_declaration=True)
+        f.flush()  # Ensure data is written to disk
+        os.fsync(f.fileno())  # Force write of file to disk
+    
+    # Verify file was written and has content
+    if os.path.getsize(output_svg_path) > 0:
+        # Simplify and optimize SVG using scour (overwrite the same file)
+        scour_svg(output_svg_path, output_svg_path)
+    else:
+        print(f"Warning: Generated SVG file {output_svg_path} is empty, skipping scour optimization")
     
     return output_svg_path
 
@@ -729,12 +766,12 @@ def main():
     # Lower values = more points = smoother curves but larger file size
     # Higher values = fewer points = simpler paths but less detail
     # Typical range: 0.0001-0.001
-    epsilon_factor = 0.00018  # Default 0.0002 gives smooth, detailed curves
+    epsilon_factor = 0.00015  # Default 0.0002 gives smooth, detailed curves
     
     # base_tension: Controls how curved the Bezier curves are
     # Higher values = more curved/flowing paths, Lower values = straighter paths
     # Typical range: 0.3-3.0
-    base_tension = 1  # Default 0.6, you have it at 2.0 for very curvy paths
+    base_tension = 0.6  # Default 0.6, you have it at 2.0 for very curvy paths
     
     # Corner detection and smoothing parameters
     # angle_threshold: Angles below this (in degrees) are considered sharp corners
