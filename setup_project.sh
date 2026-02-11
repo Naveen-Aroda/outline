@@ -1,53 +1,24 @@
-#!/usr/bin/env bash
-# ============================================================
-# Linux project setup script (Ubuntu/Debian based)
-# Installs Python 3.11, pip, virtualenv, Inkscape, Potrace,
-# and project requirements.
-# ============================================================
+#!/bin/bash
+set -e
 
-set -e  # exit immediately if a command fails
+echo "🚀 Installing Homebrew (if not installed)..."
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# ---- Step 1: Ensure system packages ----
-echo "🔧 Updating package list..."
-sudo apt update -y
+echo "🍺 Installing dependencies (python, cairo, libffi)..."
+brew install python libffi cairo
 
-echo "📦 Installing Python 3.11 and tools..."
-sudo apt install -y python3.11 python3.11-venv python3.11-distutils curl wget
+echo "🐍 Creating virtual environment using Homebrew Python..."
+/opt/homebrew/bin/python3 -m venv .venv
 
-# ---- Step 2: Ensure pip for Python 3.11 ----
-echo "🐍 Ensuring pip for Python 3.11..."
-python3.11 -m ensurepip --upgrade || true
-python3.11 -m pip install --upgrade pip setuptools wheel
-
-# ---- Step 3: Create virtual environment ----
-echo "🌱 Creating virtual environment..."
-python3.11 -m venv .venv
-
-# ---- Step 4: Fix permissions (optional safety) ----
-echo "🔒 Fixing venv ownership..."
-sudo chown -R "$USER:$USER" .venv
-
-# ---- Step 5: Activate venv ----
-echo "⚙️ Activating virtual environment..."
-# shellcheck disable=SC1091
-source .venv/bin/activate
-
-
-
-# ---- Step 6: Install Python requirements ----
-if [ -f "requirements.txt" ]; then
-    echo "📜 Installing Python requirements..."
-    python -m pip install --upgrade pip
-    python -m pip install -r requirements.txt
+echo "📦 Installing Python dependencies..."
+.venv/bin/pip install --upgrade pip
+if [ -f requirements.txt ]; then
+  .venv/bin/pip install -r requirements.txt
 else
-    echo "⚠️  No requirements.txt found — skipping Python deps."
+  .venv/bin/pip install cairosvg
 fi
 
-# ---- Step 7: Confirm success ----
-echo "✅ Setup complete!"
-echo
-echo "To activate your environment later, run:"
-echo "  source .venv/bin/activate"
-echo
-echo "Then run your scripts with:"
-echo "  python process_svg.py"
+echo "🧪 Testing CairoSVG installation..."
+.venv/bin/cairosvg --help
+
+echo "✅ Setup complete! Use 'source .venv/bin/activate' to start."
