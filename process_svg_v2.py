@@ -3,65 +3,75 @@ import cv2
 import numpy as np
 from PIL import Image
 from pathlib import Path
-import subprocess
-import tempfile
 import xml.etree.ElementTree as ET
 import re
+import io
+import cairosvg
+from scour.scour import scourString, parse_args as scour_args
+
+
+def scour_svg(infilename, outfilename):
+    """Simplify SVG using scour to reduce file size and optimize paths"""
+    # Read the input file content as string
+    with open(infilename, 'r', encoding='utf-8') as f:
+        input_content = f.read()
+    
+    # Check if file is not empty
+    if not input_content or not input_content.strip():
+        print(f"Warning: SVG file {infilename} is empty, skipping scour optimization")
+        return
+    
+    try:
+        # Get default scour options
+        options = scour_args()
+        
+        # Process the SVG string
+        output_content = scourString(input_content, options)
+        
+        # Write the optimized content
+        with open(outfilename, 'w', encoding='utf-8') as f:
+            f.write(output_content)
+    except Exception as e:
+        print(f"Warning: Scour optimization failed for {infilename}: {e}")
+        print("Continuing with unoptimized SVG...")
 
 
 def rasterize_svg(svg_path, output_size=2048, padding=400):
-    """Convert SVG to high-quality PNG using Inkscape"""
-    inkscape_exe = os.path.join(os.getcwd(), "inkscape", "bin", "inkscape.exe")
+    """Convert SVG to high-quality PNG using cairo-svg"""
+    png_data = cairosvg.svg2png(url=svg_path, dpi=150, background_color='white')
+    image = Image.open(io.BytesIO(png_data)).convert('RGB')
+    cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
     
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
-        temp_png_path = temp_file.name
+    # Make square
+    h, w = cv_image.shape[:2]
+    if h != w:
+        size = max(h, w)
+        square = np.full((size, size, 3), 255, dtype=np.uint8)
+        y_offset = (size - h) // 2
+        x_offset = (size - w) // 2
+        square[y_offset:y_offset+h, x_offset:x_offset+w] = cv_image
+        cv_image = square
     
-    try:
-        subprocess.run([
-            inkscape_exe,
-            svg_path,
-            "--export-type=png",
-            f"--export-filename={temp_png_path}",
-            f"--export-area-page",
-            f"--export-dpi=150"
-        ], check=True, capture_output=True)
-        
-        # Load and process image
-        image = Image.open(temp_png_path)
-        cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGBA2BGR)
-        
-        # Make square
-        h, w = cv_image.shape[:2]
-        if h != w:
-            size = max(h, w)
-            square = np.full((size, size, 3), 255, dtype=np.uint8)
-            y_offset = (size - h) // 2
-            x_offset = (size - w) // 2
-            square[y_offset:y_offset+h, x_offset:x_offset+w] = cv_image
-            cv_image = square
-        
-        # Resize to target size
-        cv_image = cv2.resize(cv_image, (output_size, output_size))
-        
-        # Add padding
-        padded = cv2.copyMakeBorder(
-            cv_image, padding, padding, padding, padding, 
-            cv2.BORDER_CONSTANT, value=[255, 255, 255]
-        )
-        return padded
+    # Resize to target size
+    cv_image = cv2.resize(cv_image, (output_size, output_size))
     
-    finally:
-        if os.path.exists(temp_png_path):
-            os.unlink(temp_png_path)
+    # Add padding
+    padded = cv2.copyMakeBorder(
+        cv_image, padding, padding, padding, padding, 
+        cv2.BORDER_CONSTANT, value=[255, 255, 255]
+    )
+    return padded
 
 
 def extract_outline(image):
     """Extract outline from image using contours and dilation
     Returns both the thick band image and the outer contours for single-line export
     """
-    # Convert to binary
+    # Apply adaptive thresholding and slight dilation
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+    binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    binary = cv2.dilate(binary, kernel, iterations=1)
     
     # Heavy dilation with gaussian blur and thresholding in loop
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (37, 37))
@@ -304,9 +314,19 @@ def contours_to_svg_direct(contours, image_size, output_svg_path, epsilon_factor
         })
         svg_root.append(path_elem)
     
-    # Write SVG file
+    # Write SVG file with proper flushing
     tree = ET.ElementTree(svg_root)
-    tree.write(output_svg_path, encoding='utf-8', xml_declaration=True)
+    with open(output_svg_path, 'wb') as f:
+        tree.write(f, encoding='utf-8', xml_declaration=True)
+        f.flush()  # Ensure data is written to disk
+        os.fsync(f.fileno())  # Force write of file to disk
+    
+    # Verify file was written and has content
+    if os.path.getsize(output_svg_path) > 0:
+        # Simplify and optimize SVG using scour (overwrite the same file)
+        scour_svg(output_svg_path, output_svg_path)
+    else:
+        print(f"Warning: Generated SVG file {output_svg_path} is empty, skipping scour optimization")
     
     return output_svg_path
 
@@ -668,6 +688,9 @@ def process_svg(svg_path, output_dir="output", outline_scale_multiplier=1.25,
     print("\n[1/5] Rasterizing SVG...")
     raster_image = rasterize_svg(svg_path)
     image_size = raster_image.shape[0]  # Square image, so width = height
+    raster_png = f"{output_dir}/{base_name}_rasterized.png"
+    cv2.imwrite(raster_png, raster_image)
+    print(f"Saved rasterized image: {raster_png}")
     
     # Step 2: Extract outline and contours
     print("[2/5] Extracting outline...")
@@ -743,12 +766,12 @@ def main():
     # Lower values = more points = smoother curves but larger file size
     # Higher values = fewer points = simpler paths but less detail
     # Typical range: 0.0001-0.001
-    epsilon_factor = 0.00018  # Default 0.0002 gives smooth, detailed curves
+    epsilon_factor = 0.00015  # Default 0.0002 gives smooth, detailed curves
     
     # base_tension: Controls how curved the Bezier curves are
     # Higher values = more curved/flowing paths, Lower values = straighter paths
     # Typical range: 0.3-3.0
-    base_tension = 1  # Default 0.6, you have it at 2.0 for very curvy paths
+    base_tension = 0.6  # Default 0.6, you have it at 2.0 for very curvy paths
     
     # Corner detection and smoothing parameters
     # angle_threshold: Angles below this (in degrees) are considered sharp corners
