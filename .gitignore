@@ -1,4 +1,5 @@
 .venv/
+myenv/
 svg/
 inkscape/
 output/
