@@ -1,0 +1,6 @@
+opencv-python
+pillow
+numpy
+cairosvg
+scour
+streamlit
