@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import tempfile
 import shutil
+import zipfile
+import io
 from process_svg_v2 import process_svg
 
 # Page configuration
@@ -162,19 +164,13 @@ def main():
             if folder_path and not os.path.exists(folder_path):
                 st.error(f"Path does not exist: {folder_path}")
         
-        # Output directory
-        st.header("📁 Output Settings")
-        output_dir = st.text_input(
-            "Output Folder",
-            value="output",
-            help="Directory where processed files will be saved"
-        )
+        # Remove output directory section since we're using in-memory storage
     
     with col2:
         st.header("Configuration Summary")
         st.markdown(f"""
         **Outline Scale:** {outline_scale}x  
-        **Epsilon Factor:** {epsilon_factor:.5f}  
+        **Epsilon Factor:** {epsilon_factor:.5f}
         **Base Tension:** {base_tension}  
         **Angle Threshold:** {angle_threshold}°  
         **Corner Smoothing:** {corner_tension_reduction}
@@ -202,7 +198,6 @@ def main():
         if st.button("Process SVG(s)", type="primary", use_container_width=True, disabled=st.session_state.processing):
             process_files(
                 files_to_process,
-                output_dir,
                 outline_scale,
                 epsilon_factor,
                 base_tension,
@@ -218,14 +213,54 @@ def main():
         st.markdown("---")
         st.header("Processing Results")
         
+        successful_files = [f for f in st.session_state.processed_files if f['success']]
+        
+        # Create zip with all files
+        if successful_files:
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+                for result in successful_files:
+                    for file_info in result['files']:
+                        zip_file.writestr(file_info['name'], file_info['content'])
+            
+            st.download_button(
+                label="📦 Download All as ZIP",
+                data=zip_buffer.getvalue(),
+                file_name="processed_svgs.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+        
         for result in st.session_state.processed_files:
             if result['success']:
                 st.markdown(f"""
                 <div class="success-box">
-                    <strong>{result['name']}</strong><br>
-                    Output saved to: {result['output_path']}
+                    <strong>{result['name']}</strong> - 4 files generated
                 </div>
                 """, unsafe_allow_html=True)
+                
+                # Create download buttons for each file
+                cols = st.columns(4)
+                for idx, file_info in enumerate(result['files']):
+                    with cols[idx]:
+                        # Shorten button labels
+                        if 'outline_only_lightburn' in file_info['name']:
+                            label = "Outline (LB)"
+                        elif 'outline_only' in file_info['name']:
+                            label = "Outline"
+                        elif 'overlay_lightburn' in file_info['name']:
+                            label = "Overlay (LB)"
+                        else:
+                            label = "Overlay"
+                        
+                        st.download_button(
+                            label=f"📥 {label}",
+                            data=file_info['content'],
+                            file_name=file_info['name'],
+                            mime="image/svg+xml",
+                            key=f"download_{file_info['name']}",
+                            use_container_width=True
+                        )
             else:
                 st.markdown(f"""
                 <div class="error-box">
@@ -235,14 +270,11 @@ def main():
                 """, unsafe_allow_html=True)
 
 
-def process_files(files_to_process, output_dir, outline_scale, epsilon_factor, 
+def process_files(files_to_process, outline_scale, epsilon_factor, 
                  base_tension, angle_threshold, corner_tension_reduction, is_uploaded):
     """Process the selected files"""
     st.session_state.processing = True
     st.session_state.processed_files = []
-    
-    # Create output directory
-    os.makedirs(output_dir, exist_ok=True)
     
     # Progress tracking
     progress_bar = st.progress(0)
@@ -259,7 +291,6 @@ def process_files(files_to_process, output_dir, outline_scale, epsilon_factor,
         log_messages.append("=" * 60)
         log_messages.append("SVG Outline Processor - Starting")
         log_messages.append("=" * 60)
-        log_messages.append(f"Output directory: {output_dir}")
         log_messages.append(f"Configuration:")
         log_messages.append(f"  - Outline scale: {outline_scale}x")
         log_messages.append(f"  - Epsilon factor: {epsilon_factor}")
@@ -291,33 +322,61 @@ def process_files(files_to_process, output_dir, outline_scale, epsilon_factor,
         
         try:
             # Process the file
-            result = process_svg(
-                tmp_path,
-                output_dir,
-                outline_scale,
-                angle_threshold,
-                corner_tension_reduction,
-                epsilon_factor,
-                base_tension
-            )
-            
-            if result:
-                success_count += 1
-                log_messages.append(f"[{idx + 1}/{total_files}] Successfully processed: {file_name}")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                result = process_svg(
+                    tmp_path,
+                    temp_dir,
+                    outline_scale,
+                    angle_threshold,
+                    corner_tension_reduction,
+                    epsilon_factor,
+                    base_tension
+                )
                 
-                st.session_state.processed_files.append({
-                    'name': file_name,
-                    'success': True,
-                    'output_path': output_dir
-                })
-            else:
-                log_messages.append(f"[{idx + 1}/{total_files}] Failed to process: {file_name}")
-                
-                st.session_state.processed_files.append({
-                    'name': file_name,
-                    'success': False,
-                    'error': 'Processing returned None'
-                })
+                if result:
+                    # result is a tuple of 4 file paths
+                    overlay_path, outline_only_path, overlay_lb_path, outline_only_lb_path = result
+                    
+                    # Read all 4 output files
+                    files_data = []
+                    all_exist = True
+                    
+                    for path in [outline_only_path, overlay_path, outline_only_lb_path, overlay_lb_path]:
+                        if os.path.exists(path):
+                            with open(path, 'r', encoding='utf-8') as f:
+                                files_data.append({
+                                    'name': Path(path).name,
+                                    'content': f.read()
+                                })
+                        else:
+                            all_exist = False
+                            break
+                    
+                    if all_exist:
+                        success_count += 1
+                        log_messages.append(f"[{idx + 1}/{total_files}] Successfully processed: {file_name}")
+                        
+                        st.session_state.processed_files.append({
+                            'name': file_name,
+                            'success': True,
+                            'files': files_data
+                        })
+                    else:
+                        log_messages.append(f"[{idx + 1}/{total_files}] Some output files not found: {file_name}")
+                        
+                        st.session_state.processed_files.append({
+                            'name': file_name,
+                            'success': False,
+                            'error': 'Some output files not found'
+                        })
+                else:
+                    log_messages.append(f"[{idx + 1}/{total_files}] Failed to process: {file_name}")
+                    
+                    st.session_state.processed_files.append({
+                        'name': file_name,
+                        'success': False,
+                        'error': 'Processing returned None'
+                    })
             
             # Clean up temp file if uploaded
             if is_uploaded and os.path.exists(tmp_path):
