@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-# Install system dependencies
+# Install system dependencies required by CairoSVG and OpenCV
 RUN apt-get update && apt-get install -y \
     libcairo2 \
     libpango-1.0-0 \
@@ -10,14 +10,20 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Set working directory
 WORKDIR /app
 
-COPY requirements.txt .
+# Copy requirements
+COPY requirements_webapp.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements_webapp.txt
 
+# Copy project files
 COPY . .
 
-EXPOSE 8501
+# Flask port
+EXPOSE 8000
 
-CMD ["streamlit", "run", "svg_processor_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Start Flask app
+CMD ["python", "app.py"]
