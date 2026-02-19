@@ -5,3 +5,4 @@ cairocffi
 opencv-python-headless
 numpy
 pillow
+scour
