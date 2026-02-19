@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SVG Outline Processor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .header { background: #1f77b4; color: white; padding: 30px; border-radius: 8px 8px 0 0; }
+        .header h1 { font-size: 2rem; margin-bottom: 8px; }
+        .header p { opacity: 0.9; }
+        .content { display: grid; grid-template-columns: 300px 1fr; gap: 20px; padding: 20px; }
+        .sidebar { background: #f8f9fa; padding: 20px; border-radius: 8px; }
+        .sidebar h3 { margin-bottom: 15px; }
+        .param { margin-bottom: 20px; }
+        .param label { display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px; }
+        .param input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .param small { display: block; margin-top: 4px; color: #666; font-size: 12px; }
+        .main { padding: 20px; }
+        .upload-area { border: 2px dashed #ddd; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .upload-area:hover { border-color: #1f77b4; background: #f8f9fa; }
+        .upload-area.dragover { border-color: #1f77b4; background: #e3f2fd; }
+        .btn { padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: 500; transition: all 0.3s; }
+        .btn-primary { background: #1f77b4; color: white; width: 100%; margin-top: 20px; }
+        .btn-primary:hover { background: #1565c0; }
+        .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+        .results { margin-top: 30px; }
+        .result-item { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+        .result-item.success { background: #d4edda; border: 1px solid #c3e6cb; }
+        .result-item.error { background: #f8d7da; border: 1px solid #f5c6cb; }
+        .file-list { margin-top: 15px; }
+        .file-item { background: white; padding: 8px 12px; margin: 5px 0; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+        .btn-small { padding: 6px 12px; font-size: 14px; background: #1f77b4; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .btn-small:hover { background: #1565c0; }
+        .progress { width: 100%; height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden; margin: 20px 0; display: none; }
+        .progress-bar { height: 100%; background: #1f77b4; transition: width 0.3s; }
+        .hidden { display: none; }
+        .downloads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SVG Outline Processor</h1>
+            <p>Extract smooth outlines from SVG files with customizable parameters</p>
+        </div>
+        
+        <div class="content">
+            <div class="sidebar">
+                <h3>Parameters</h3>
+                <div class="param">
+                    <label>Outline Scale: <span id="scale-val">1.4</span>x</label>
+                    <input type="range" id="outline_scale" min="1" max="2" step="0.05" value="1.4">
+                    <small>How much bigger the outline should be</small>
+                </div>
+                <div class="param">
+                    <label>Epsilon: <span id="epsilon-val">0.00015</span></label>
+                    <input type="range" id="epsilon_factor" min="0.0001" max="0.001" step="0.00001" value="0.00015">
+                    <small>Point reduction/smoothing</small>
+                </div>
+                <div class="param">
+                    <label>Base Tension: <span id="tension-val">0.6</span></label>
+                    <input type="range" id="base_tension" min="0.3" max="3" step="0.1" value="0.6">
+                    <small>Curve intensity</small>
+                </div>
+                <div class="param">
+                    <label>Angle Threshold: <span id="angle-val">160</span>°</label>
+                    <input type="range" id="angle_threshold" min="90" max="180" step="5" value="160">
+                    <small>Corner detection threshold</small>
+                </div>
+                <div class="param">
+                    <label>Corner Smoothing: <span id="corner-val">0.0</span></label>
+                    <input type="range" id="corner_tension_reduction" min="0" max="1" step="0.1" value="0">
+                    <small>0.0 = max smoothing</small>
+                </div>
+            </div>
+            
+            <div class="main">
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" id="fileInput" multiple accept=".svg" class="hidden">
+                    <p>📂 Drag & drop SVG files here or click to browse</p>
+                    <p style="margin-top: 10px; color: #666; font-size: 14px;">Selected: <span id="fileCount">0</span> files</p>
+                </div>
+                
+                <button class="btn btn-primary" id="processBtn" disabled>Process SVG(s)</button>
+                
+                <div class="progress" id="progress">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                
+                <div class="results" id="results"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const processBtn = document.getElementById('processBtn');
+        const fileCount = document.getElementById('fileCount');
+        const results = document.getElementById('results');
+        const progress = document.getElementById('progress');
+        const progressBar = document.getElementById('progressBar');
+        
+        let selectedFiles = [];
+        
+        // Update slider values
+        ['outline_scale', 'epsilon_factor', 'base_tension', 'angle_threshold', 'corner_tension_reduction'].forEach(id => {
+            const input = document.getElementById(id);
+            const display = document.getElementById(id.replace('_', '-') + '-val');
+            input.addEventListener('input', () => {
+                display.textContent = id === 'epsilon_factor' ? parseFloat(input.value).toFixed(5) : input.value;
+            });
+        });
+        
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFiles(e.dataTransfer.files);
+        });
+        
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+        
+        function handleFiles(files) {
+            selectedFiles = Array.from(files).filter(f => f.name.endsWith('.svg'));
+            fileCount.textContent = selectedFiles.length;
+            processBtn.disabled = selectedFiles.length === 0;
+        }
+        
+        processBtn.addEventListener('click', async () => {
+            if (selectedFiles.length === 0) return;
+            
+            processBtn.disabled = true;
+            progress.style.display = 'block';
+            results.innerHTML = '';
+            
+            const formData = new FormData();
+            selectedFiles.forEach(file => formData.append('files', file));
+            formData.append('outline_scale', document.getElementById('outline_scale').value);
+            formData.append('epsilon_factor', document.getElementById('epsilon_factor').value);
+            formData.append('base_tension', document.getElementById('base_tension').value);
+            formData.append('angle_threshold', document.getElementById('angle_threshold').value);
+            formData.append('corner_tension_reduction', document.getElementById('corner_tension_reduction').value);
+            
+            try {
+                const response = await fetch('/process', { method: 'POST', body: formData });
+                const data = await response.json();
+                
+                progressBar.style.width = '100%';
+                displayResults(data);
+            } catch (error) {
+                results.innerHTML = `<div class="result-item error">Error: ${error.message}</div>`;
+            } finally {
+                processBtn.disabled = false;
+                setTimeout(() => progress.style.display = 'none', 1000);
+            }
+        });
+        
+        function displayResults(data) {
+            const successFiles = data.filter(r => r.success);
+            
+            if (successFiles.length > 0) {
+                const zipBtn = document.createElement('button');
+                zipBtn.className = 'btn btn-primary';
+                zipBtn.textContent = '📦 Download All as ZIP';
+                zipBtn.onclick = () => downloadZip(successFiles);
+                results.appendChild(zipBtn);
+            }
+            
+            data.forEach(result => {
+                const div = document.createElement('div');
+                div.className = `result-item ${result.success ? 'success' : 'error'}`;
+                
+                if (result.success) {
+                    div.innerHTML = `<strong>${result.name}</strong> - ${result.files.length} files generated`;
+                    const downloads = document.createElement('div');
+                    downloads.className = 'downloads';
+                    result.files.forEach(file => {
+                        const btn = document.createElement('button');
+                        btn.className = 'btn-small';
+                        btn.textContent = `📥 ${file.name.includes('lightburn') ? 'LB' : 'STD'}`;
+                        btn.onclick = () => downloadFile(file.name, file.content);
+                        downloads.appendChild(btn);
+                    });
+                    div.appendChild(downloads);
+                } else {
+                    div.innerHTML = `<strong>${result.name}</strong><br>Error: ${result.error}`;
+                }
+                
+                results.appendChild(div);
+            });
+        }
+        
+        function downloadFile(name, content) {
+            const blob = new Blob([content], { type: 'image/svg+xml' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        async function downloadZip(successFiles) {
+            const response = await fetch('/download-zip', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(successFiles)
+            });
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'processed_svgs.zip';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>
