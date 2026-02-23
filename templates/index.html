@@ -27,6 +27,9 @@
         .btn-primary { background: #1f77b4; color: white; width: 100%; margin-top: 20px; }
         .btn-primary:hover { background: #1565c0; }
         .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-primary.processing { background: #ff9800; }
+        .processing-text { display: inline-block; margin-left: 8px; animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         .results { margin-top: 30px; }
         .result-item { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
         .result-item.success { background: #d4edda; border: 1px solid #c3e6cb; }
@@ -85,7 +88,9 @@
                     <p style="margin-top: 10px; color: #666; font-size: 14px;">Selected: <span id="fileCount">0</span> files</p>
                 </div>
                 
-                <button class="btn btn-primary" id="processBtn" disabled>Process SVG(s)</button>
+                <button class="btn btn-primary" id="processBtn" disabled>
+                    <span id="btnText">Process SVG(s)</span>
+                </button>
                 
                 <div class="progress" id="progress">
                     <div class="progress-bar" id="progressBar"></div>
@@ -158,8 +163,12 @@
         processBtn.addEventListener('click', async () => {
             if (selectedFiles.length === 0) return;
             
+            const btnText = document.getElementById('btnText');
             processBtn.disabled = true;
+            processBtn.classList.add('processing');
+            btnText.innerHTML = '⚙️ Processing<span class="processing-text">...</span>';
             progress.style.display = 'block';
+            progressBar.style.width = '30%';
             results.innerHTML = '';
             
             const params = {
@@ -183,6 +192,7 @@
             formData.append('corner_tension_reduction', params.corner_tension_reduction);
             
             try {
+                progressBar.style.width = '60%';
                 const response = await fetch('/process', { method: 'POST', body: formData });
                 const data = await response.json();
                 
@@ -192,7 +202,12 @@
                 results.innerHTML = `<div class="result-item error">Error: ${error.message}</div>`;
             } finally {
                 processBtn.disabled = false;
-                setTimeout(() => progress.style.display = 'none', 1000);
+                processBtn.classList.remove('processing');
+                btnText.textContent = 'Process SVG(s)';
+                setTimeout(() => {
+                    progress.style.display = 'none';
+                    progressBar.style.width = '0';
+                }, 1000);
             }
         });
         
