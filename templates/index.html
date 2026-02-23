@@ -139,6 +139,22 @@
             processBtn.disabled = selectedFiles.length === 0;
         }
         
+        // Google Sheets logging
+        const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxgvXRgXWs5VgHkhDf9aV4FSKL2_0qQinvjpK3UZz7YhYtYtuoDXDvcwa2FXcxNJQ2_qw/exec'; // Replace with your Apps Script Web App URL
+        
+        async function logToGoogleSheets(params) {
+            try {
+                await fetch(GOOGLE_SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(params)
+                });
+            } catch (error) {
+                console.error('Failed to log to Google Sheets:', error);
+            }
+        }
+        
         processBtn.addEventListener('click', async () => {
             if (selectedFiles.length === 0) return;
             
@@ -146,13 +162,25 @@
             progress.style.display = 'block';
             results.innerHTML = '';
             
+            const params = {
+                fileCount: selectedFiles.length,
+                outline_scale: document.getElementById('outline_scale').value,
+                epsilon_factor: document.getElementById('epsilon_factor').value,
+                base_tension: document.getElementById('base_tension').value,
+                angle_threshold: document.getElementById('angle_threshold').value,
+                corner_tension_reduction: document.getElementById('corner_tension_reduction').value
+            };
+            
+            // Log to Google Sheets
+            logToGoogleSheets(params);
+            
             const formData = new FormData();
             selectedFiles.forEach(file => formData.append('files', file));
-            formData.append('outline_scale', document.getElementById('outline_scale').value);
-            formData.append('epsilon_factor', document.getElementById('epsilon_factor').value);
-            formData.append('base_tension', document.getElementById('base_tension').value);
-            formData.append('angle_threshold', document.getElementById('angle_threshold').value);
-            formData.append('corner_tension_reduction', document.getElementById('corner_tension_reduction').value);
+            formData.append('outline_scale', params.outline_scale);
+            formData.append('epsilon_factor', params.epsilon_factor);
+            formData.append('base_tension', params.base_tension);
+            formData.append('angle_threshold', params.angle_threshold);
+            formData.append('corner_tension_reduction', params.corner_tension_reduction);
             
             try {
                 const response = await fetch('/process', { method: 'POST', body: formData });
