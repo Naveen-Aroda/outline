@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-from flask import Flask, render_template, request, send_file, jsonify
+from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from typing import List, Optional
 import os
 from pathlib import Path
 import tempfile
@@ -7,34 +11,41 @@ import zipfile
 import io
 from process_svg_v2 import process_svg
 
-app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
+app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse(request, "index.html")
 
-@app.route('/process', methods=['POST'])
-def process():
-    files = request.files.getlist('files')
+@app.post("/process")
+async def process(
+    files: List[UploadFile] = File(...),
+    outline_scale: float = Form(1.4),
+    epsilon_factor: float = Form(0.00015),
+    base_tension: float = Form(0.6),
+    angle_threshold: int = Form(160),
+    corner_tension_reduction: float = Form(0.0)
+):
     params = {
-        'outline_scale': float(request.form.get('outline_scale', 1.4)),
-        'epsilon_factor': float(request.form.get('epsilon_factor', 0.00015)),
-        'base_tension': float(request.form.get('base_tension', 0.6)),
-        'angle_threshold': int(request.form.get('angle_threshold', 160)),
-        'corner_tension_reduction': float(request.form.get('corner_tension_reduction', 0.0))
+        'outline_scale': outline_scale,
+        'epsilon_factor': epsilon_factor,
+        'base_tension': base_tension,
+        'angle_threshold': angle_threshold,
+        'corner_tension_reduction': corner_tension_reduction
     }
-    
+
     results = []
-    
+
     for file in files:
         if not file.filename.endswith('.svg'):
             continue
-            
+
         with tempfile.NamedTemporaryFile(delete=False, suffix='.svg', mode='wb') as tmp_in:
-            file.save(tmp_in.name)
+            tmp_in.write(await file.read())
             tmp_path = tmp_in.name
-        
+
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 result = process_svg(
@@ -43,7 +54,7 @@ def process():
                     params['corner_tension_reduction'], params['epsilon_factor'],
                     params['base_tension']
                 )
-                
+
                 if result:
                     files_data = []
                     for path in result:
@@ -53,8 +64,8 @@ def process():
                                     'name': Path(path).name,
                                     'content': f.read()
                                 })
-                    
-                    results.append({
+
+                    results.append({ 
                         'name': file.filename,
                         'success': True,
                         'files': files_data
@@ -65,22 +76,40 @@ def process():
             results.append({'name': file.filename, 'success': False, 'error': str(e)})
         finally:
             os.unlink(tmp_path)
-    
-    return jsonify(results)
 
-@app.route('/download-zip', methods=['POST'])
-def download_zip():
-    data = request.json
-    
+    return JSONResponse(content=results)
+
+class DownloadRequest(list):
+    pass
+
+from pydantic import BaseModel
+
+class FileInfo(BaseModel):
+    name: str
+    content: str
+
+class ProcessResult(BaseModel):
+    success: bool
+    files: Optional[List[FileInfo]] = []
+    name: Optional[str] = None
+    error: Optional[str] = None
+
+@app.post("/download-zip")
+async def download_zip(data: List[ProcessResult]):
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
         for result in data:
-            if result['success']:
-                for file_info in result['files']:
-                    zip_file.writestr(file_info['name'], file_info['content'])
-    
+            if result.success:
+                for file_info in result.files:
+                    zip_file.writestr(file_info.name, file_info.content)
+
     zip_buffer.seek(0)
-    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name='processed_svgs.zip')
+    return StreamingResponse(
+        zip_buffer,
+        media_type='application/zip',
+        headers={"Content-Disposition": "attachment; filename=processed_svgs.zip"}
+    )
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8000)
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,5 +1,6 @@
-flask
-gunicorn
+fastapi
+uvicorn[standard]
+python-multipart
 cairosvg
 cairocffi
 opencv-python-headless
